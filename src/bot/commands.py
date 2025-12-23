@@ -19,6 +19,7 @@ class CommandHandler:
         self.livekit_controller = livekit_controller
         self.recording_service = recording_service
         self.active_recordings: Dict[str, str] = {}  # room_id -> egress_id
+        self.active_calls: Dict[str, str] = {}  # room_id -> call_id
         
     async def handle_command(
         self,
@@ -72,6 +73,12 @@ class CommandHandler:
         if room_id in self.active_recordings:
             return f"Recording already in progress. Egress ID: {self.active_recordings[room_id]}"
         
+        # Check if there's an active call in this room
+        if room_id not in self.active_calls:
+            return "❌ No active call in this room. Recording can only be started during an active call."
+        
+        call_id = self.active_calls[room_id]
+        
         # Use provided room_name or generate from Matrix room ID
         if not room_name:
             room_name = room.room_id.split(":")[0].replace("!", "").replace("#", "")
@@ -94,6 +101,7 @@ class CommandHandler:
             return (
                 f"✅ Recording started!\n"
                 f"Room: {room_name}\n"
+                f"Call ID: {call_id}\n"
                 f"Egress ID: {egress_id}\n"
                 f"Use /record stop to stop recording."
             )
@@ -132,5 +140,26 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"Failed to stop recording: {e}")
             return f"❌ Failed to stop recording: {str(e)}"
+    
+    def register_call(self, room_id: str, call_id: str) -> None:
+        """Register an active call in a room"""
+        self.active_calls[room_id] = call_id
+        logger.info(f"Call started in room {room_id}, call_id: {call_id}")
+    
+    def unregister_call(self, room_id: str) -> Optional[str]:
+        """Unregister an active call in a room. Returns egress_id if recording is active."""
+        if room_id in self.active_calls:
+            call_id = self.active_calls.pop(room_id)
+            logger.info(f"Call ended in room {room_id}, call_id: {call_id}")
+            
+            # If recording is active, return egress_id for automatic stopping
+            if room_id in self.active_recordings:
+                logger.info(f"Recording is active, will stop automatically due to call end in room {room_id}")
+                return self.active_recordings.get(room_id)
+        return None
+    
+    def has_active_call(self, room_id: str) -> bool:
+        """Check if there's an active call in the room"""
+        return room_id in self.active_calls
 
 

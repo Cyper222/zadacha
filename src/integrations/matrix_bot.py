@@ -9,6 +9,7 @@ from ..bot.commands import CommandHandler
 from ..bot.event_handler import EventHandler
 from ..bot.livekit_controller import LiveKitController
 from .livekit_client import LiveKitClient
+from nio.events import CallInviteEvent, CallHangupEvent
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +68,21 @@ class MatrixBot:
         self.event_handler = EventHandler(self, self.command_handler)
         
 
+        # Register callbacks for messages
         self.client.add_event_callback(
             self._on_message,
             RoomMessageText
+        )
+        
+        # Register callbacks for call events
+        self.client.add_event_callback(
+            self._on_call_invite,
+            CallInviteEvent
+        )
+        
+        self.client.add_event_callback(
+            self._on_call_hangup,
+            CallHangupEvent
         )
         
         logger.info(f"Matrix bot started as {self.config.user_id}")
@@ -92,8 +105,16 @@ class MatrixBot:
             raise
             
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        """Callback вызов для сообщений Matrix """
+        """Callback for Matrix messages"""
         await self.event_handler.handle_message(room, event)
+    
+    async def _on_call_invite(self, room: MatrixRoom, event: CallInviteEvent) -> None:
+        """Callback for call invite events"""
+        await self.event_handler.handle_call_invite(room, event)
+    
+    async def _on_call_hangup(self, room: MatrixRoom, event: CallHangupEvent) -> None:
+        """Callback for call hangup events"""
+        await self.event_handler.handle_call_hangup(room, event)
         
     async def send_message(self, room_id: str, message: str) -> None:
         """Отправка сообщений Matrix room"""
