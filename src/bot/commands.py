@@ -24,7 +24,7 @@ class CommandHandler:
     async def handle_command(
         self,
         command: str,
-        room: MatrixRoom,
+        room_id: str,
         sender: str
     ) -> Optional[str]:
         """
@@ -32,7 +32,7 @@ class CommandHandler:
         
         Args:
             command: Command text (e.g., "/record start")
-            room: Matrix room where command was sent
+            room_id: Matrix room ID where command was sent
             sender: User who sent the command
             
         Returns:
@@ -46,15 +46,14 @@ class CommandHandler:
         
         if cmd == "/record":
             if len(parts) < 2:
-                return "Usage: /record start|stop [room_name]"
+                return "Usage: /record start|stop"
             
             action = parts[1].lower()
-            room_name = parts[2] if len(parts) > 2 else None
             
             if action == "start":
-                return await self._handle_record_start(room, sender, room_name)
+                return await self._handle_record_start(room_id, sender)
             elif action == "stop":
-                return await self._handle_record_stop(room, sender, room_name)
+                return await self._handle_record_stop(room_id, sender)
             else:
                 return f"Unknown action: {action}. Use 'start' or 'stop'"
         
@@ -62,12 +61,11 @@ class CommandHandler:
     
     async def _handle_record_start(
         self,
-        room: MatrixRoom,
-        sender: str,
-        room_name: Optional[str]
+        room: str,
+        sender: str
     ) -> str:
         """Handle /record start command"""
-        room_id = room.room_id
+        room_id = room
         
         # Check if already recording
         if room_id in self.active_recordings:
@@ -79,44 +77,102 @@ class CommandHandler:
         
         call_id = self.active_calls[room_id]
         
-        # Use provided room_name or generate from Matrix room ID
-        if not room_name:
-            room_name = room.room_id.split(":")[0].replace("!", "").replace("#", "")
+        # Use call_id as LiveKit room name
+        # call_id is unique per call and comes from Matrix VoIP events
+        livekit_room_name = call_id
+        
+        logger.info(f"Starting recording for LiveKit room: {livekit_room_name} (Matrix room: {room_id}, call_id: {call_id})")
         
         try:
+            # Check if LiveKit room exists, create if needed (dev_mode)
+            # In production, rooms should exist; in dev_mode we can create them on demand
+            if hasattr(self.livekit_controller, 'livekit_client') and self.livekit_controller.livekit_client:
+                # Try to create room if it doesn't exist (only in dev_mode)
+                # The recording service has access to livekit_client
+                pass  # Will handle in recording service if needed
+            
             # Use recording service if available, otherwise use controller directly
             if self.recording_service:
                 recording = await self.recording_service.start_recording(
-                    room_name=room_name,
+                    room_name=livekit_room_name,
                     matrix_room_id=room_id,
                     started_by=sender
                 )
                 egress_id = recording.egress_id
             else:
-                result = await self.livekit_controller.start_recording(room_name=room_name)
+                result = await self.livekit_controller.start_recording(room_name=livekit_room_name)
                 egress_id = result["egress_id"]
             
             self.active_recordings[room_id] = egress_id
             
             return (
                 f"✅ Recording started!\n"
-                f"Room: {room_name}\n"
+                f"LiveKit Room: {livekit_room_name}\n"
                 f"Call ID: {call_id}\n"
                 f"Egress ID: {egress_id}\n"
                 f"Use /record stop to stop recording."
             )
         except Exception as e:
+            error_msg = str(e)
             logger.error(f"Failed to start recording: {e}")
-            return f"❌ Failed to start recording: {str(e)}"
+            
+            # Provide helpful error messages and try to create room if it doesn't exist
+            if "room does not exist" in error_msg.lower() or "not_found" in error_msg.lower():
+                # Try to create the room if in dev_mode
+                try:
+                    if hasattr(self, 'recording_service') and self.recording_service:
+                        livekit_client = getattr(self.recording_service, 'livekit_client', None)
+                        if livekit_client:
+                            # Check if dev_mode is enabled
+                            from ...config.config import LiveKitConfig
+                            import inspect
+                            config = getattr(livekit_client, 'config', None)
+                            if config and getattr(config, 'dev_mode', False):
+                                logger.info(f"Room {livekit_room_name} doesn't exist, creating it (dev_mode enabled)")
+                                await livekit_client.create_room(room_name=livekit_room_name)
+                                
+                                # Retry recording after creating room
+                                logger.info("Retrying recording after room creation")
+                                try:
+                                    recording = await self.recording_service.start_recording(
+                                        room_name=livekit_room_name,
+                                        matrix_room_id=room_id,
+                                        started_by=sender
+                                    )
+                                    egress_id = recording.egress_id
+                                    self.active_recordings[room_id] = egress_id
+                                    
+                                    return (
+                                        f"✅ Recording started!\n"
+                                        f"LiveKit Room: {livekit_room_name} (created)\n"
+                                        f"Call ID: {call_id}\n"
+                                        f"Egress ID: {egress_id}\n"
+                                        f"Use /record stop to stop recording."
+                                    )
+                                except Exception as retry_error:
+                                    logger.error(f"Failed to start recording after room creation: {retry_error}")
+                                    return (
+                                        f"❌ Room created but recording failed: {retry_error}\n"
+                                        f"Room: {livekit_room_name}"
+                                    )
+                except Exception as create_error:
+                    logger.debug(f"Failed to create room automatically: {create_error}")
+                
+                return (
+                    f"❌ LiveKit room '{livekit_room_name}' does not exist.\n"
+                    f"This usually means the LiveKit room hasn't been created yet.\n"
+                    f"Please ensure the room exists in LiveKit before starting recording."
+                )
+            else:
+                return f"❌ Failed to start recording: {error_msg}"
     
     async def _handle_record_stop(
         self,
-        room: MatrixRoom,
-        sender: str,
-        room_name: Optional[str]
+        room: str,
+        sender: str
     ) -> str:
         """Handle /record stop command"""
-        room_id = room.room_id
+        room_id = room
         
         if room_id not in self.active_recordings:
             return "No active recording found for this room."

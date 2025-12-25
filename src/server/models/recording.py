@@ -23,10 +23,14 @@ class Recording(Base):
     room_name = Column(String(255), nullable=False, index=True)
     matrix_room_id = Column(String(255), nullable=True, index=True)
 
-    file_path = Column(Text, nullable=True)
+    file_path = Column(Text, nullable=True)  # Legacy field, kept for compatibility
     file_url = Column(Text, nullable=True)
     file_size = Column(String(50), nullable=True)
     duration = Column(String(50), nullable=True)
+    
+    # S3/MinIO metadata
+    bucket = Column(String(255), nullable=True, index=True)  # S3 bucket name
+    object_key = Column(Text, nullable=True)  # S3 object key (path in bucket)
 
     started_by = Column(String(255), nullable=True)
     stopped_by = Column(String(255), nullable=True)
@@ -39,7 +43,7 @@ class Recording(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
 
-    metadata = Column(Text, nullable=True)
+    context = Column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Recording(id={self.id}, egress_id={self.egress_id}, status={self.status})>"

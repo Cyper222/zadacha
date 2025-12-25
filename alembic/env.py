@@ -20,11 +20,20 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Get database URL from environment
-database_url = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://matrix_bot:matrix_bot_password@localhost:5432/matrix_livekit_bot"
-)
+# Get database URL from configuration
+# Try to load from pydantic-settings first, fallback to env var for CLI usage
+try:
+    from src.config.config import DatabaseConfig
+    db_config = DatabaseConfig()
+    database_url = db_config.url
+except Exception as e:
+    # Fallback for alembic CLI usage when config module is not available
+    # Use DATABASE_URL (single underscore) to match our config format
+    database_url = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://matrix_bot:matrix_bot_password@localhost:5432/matrix_livekit_bot"
+    )
+
 config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here for 'autogenerate' support

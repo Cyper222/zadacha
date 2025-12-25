@@ -43,21 +43,3 @@ async def root():
         "version": "0.1.0",
         "status": "running"
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    
-    host = os.getenv("SERVER_HOST", "0.0.0.0")
-    port = int(os.getenv("SERVER_PORT", "8000"))
-    
-    uvicorn.run(
-        "src.server.main:app",
-        host=host,
-        port=port,
-        reload=True,
-        log_level="info"
-    )
-
-

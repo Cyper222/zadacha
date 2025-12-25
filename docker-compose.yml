@@ -17,11 +17,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - app-net
 
-  # Optional: MinIO for file storage
+  # Redis for LiveKit Egress communication
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - livekit-net
+
+  # MinIO for S3-compatible storage
   minio:
     image: minio/minio:latest
-    container_name: matrix_livekit_bot_minio
+    container_name: minio
+    command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -30,16 +50,143 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
-    command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
+    networks:
+      - livekit-net
+
+  livekit:
+    image: livekit/livekit-server:v1.7.2
+    container_name: livekit
+    command: ["--config", "/etc/livekit.yaml"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7880/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - livekit-net
+
+  livekit-egress:
+    image: livekit/egress:v1.7.2
+    container_name: livekit-egress
+    depends_on:
+      livekit:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
+      LIVEKIT_WS_URL: ws://livekit:7880
+      LIVEKIT_URL: ws://livekit:7880
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+    # Debug: check if file exists with: docker exec livekit-egress cat /etc/egress.yaml
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -f /etc/egress.yaml ]; then
+          echo "Config file found, starting egress..."
+          exec egress --config /etc/egress.yaml
+        else
+          echo "ERROR: Config file /etc/egress.yaml not found!"
+          ls -la /etc/
+          exit 1
+        fi
+    networks:
+      - livekit-net
+    restart: unless-stopped
+    # Required for Chrome sandbox in Docker
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: matrix_livekit_bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # Matrix Configuration
+      MATRIX_HOMESERVER: ${MATRIX_HOMESERVER}
+      MATRIX_USER_ID: ${MATRIX_USER_ID}
+      MATRIX_ACCESS_TOKEN: ${MATRIX_ACCESS_TOKEN}
+      MATRIX_DEVICE_ID: ${MATRIX_DEVICE_ID:-}
+      # LiveKit Configuration
+      # Use 'livekit' hostname when running in Docker, 'localhost' when running locally
+      LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
+      LIVEKIT_DEV_MODE: ${LIVEKIT_DEV_MODE:-true}
+      # Database Configuration
+      DATABASE_URL: postgresql+asyncpg://matrix_bot:matrix_bot_password@postgres:5432/matrix_livekit_bot
+      # MinIO/S3 Configuration
+      # Use 'minio' hostname when running in Docker, 'localhost' when running locally
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-recordings}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      # Server Configuration
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./.env:/app/.env:ro
+    networks:
+      - app-net
+      - livekit-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/webhook/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_data:
+  redis_data:
   minio_data:
+
+networks:
+  livekit-net:
+    driver: bridge
+  app-net:
+    driver: bridge
 
 
 
