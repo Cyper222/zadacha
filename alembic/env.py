@@ -21,17 +21,16 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Get database URL from configuration
-# Try to load from pydantic-settings first, fallback to env var for CLI usage
+# Always load from .env via pydantic-settings (no fallback to hardcoded values)
 try:
     from src.config.config import DatabaseConfig
     db_config = DatabaseConfig()
     database_url = db_config.url
 except Exception as e:
-    # Fallback for alembic CLI usage when config module is not available
-    # Use DATABASE_URL (single underscore) to match our config format
-    database_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://matrix_bot:matrix_bot_password@localhost:5432/matrix_livekit_bot"
+    # If DATABASE__URL is not in .env, raise error instead of using fallback
+    raise RuntimeError(
+        f"Failed to load DATABASE__URL from .env file: {e}\n"
+        "Please ensure .env file exists with DATABASE__URL variable."
     )
 
 config.set_main_option("sqlalchemy.url", database_url)

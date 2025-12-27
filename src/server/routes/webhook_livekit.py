@@ -1,4 +1,3 @@
-"""LiveKit webhook routes"""
 import logging
 from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException, Header
@@ -15,28 +14,13 @@ async def handle_livekit_webhook(
     request: Request,
     authorization: str = Header(None),
 ) -> Dict[str, Any]:
-    """
-    Handle LiveKit egress webhook
-    
-    This endpoint receives webhooks from LiveKit when egress events occur.
-    Expected events: egress_started, egress_updated, egress_ended
-    """
     try:
-        # Verify webhook secret if needed
-        # if authorization != f"Bearer {WEBHOOK_SECRET}":
-        #     raise HTTPException(status_code=401, detail="Unauthorized")
-        
-        # Get recording service from app state
         recording_service: RecordingService = request.app.state.recording_service
-        
-        # Parse webhook payload
         payload = await request.json()
         event_type = payload.get("event")
         egress_info = payload.get("egress", {})
         
         logger.info(f"Received LiveKit webhook: {event_type}, egress_id: {egress_info.get('egress_id')}")
-        
-        # Handle webhook event through service
         recording = await recording_service.handle_webhook_event(event_type, egress_info)
         
         if event_type == "egress_ended" and recording:
@@ -60,7 +44,6 @@ async def handle_livekit_webhook(
 
 @router.get("/health")
 async def health_check() -> Dict[str, str]:
-    """Health check endpoint"""
     return {"status": "ok", "service": "matrix-livekit-bot"}
 
 

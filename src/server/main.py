@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from .lifespan import lifespan
 from .routes.webhook_livekit import router as webhook_router
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -14,7 +13,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Create FastAPI app
 app = FastAPI(
     title="Matrix LiveKit Bot API",
     description="Backend API for Matrix LiveKit Bot",
@@ -22,22 +20,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(webhook_router)
 
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
         "service": "matrix-livekit-bot",
         "version": "0.1.0",

@@ -42,8 +42,8 @@ class Recording(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
-
     context = Column(Text, nullable=True)
+    extra_metadata = Column(Text, name="metadata", nullable=True)
 
     def __repr__(self) -> str:
         return f"<Recording(id={self.id}, egress_id={self.egress_id}, status={self.status})>"
